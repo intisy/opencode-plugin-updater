@@ -1,10 +1,22 @@
 import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { join, dirname } from "path";
 
-var CONFIG_DIR = join(import.meta.dir, "..");
+// Resolve config root by walking up from this file until plugins.json is found.
+// Works whether loaded from plugin/ or repos/opencode-plugin-updater/.
+function findConfigDir(start) {
+  var dir = start;
+  for (var i = 0; i < 5; i++) {
+    if (existsSync(join(dir, "plugins.json"))) return dir;
+    var parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return dirname(start);
+}
+
+var CONFIG_DIR = findConfigDir(import.meta.dir);
 var REPOS_DIR = join(CONFIG_DIR, "repos");
-var PLUGIN_DIR = join(import.meta.dir);
+var PLUGIN_DIR = join(CONFIG_DIR, "plugin");
 var LOG_FILE = join(CONFIG_DIR, "plugin-updater.log");
 
 var PLUGINS_JSON = join(CONFIG_DIR, "plugins.json");
@@ -32,13 +44,9 @@ function log(msg) {
 }
 
 async function run(cmd, cwd, label) {
+  if (!cmd) { log(label + " skipped (null)"); return true; }
   try {
-    var proc = Bun.spawn(cmd, {
-      cwd: cwd,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    var proc = Bun.spawn(cmd, { cwd: cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     var code = await proc.exited;
     if (code !== 0) {
       var errText = "";
@@ -56,25 +64,15 @@ async function run(cmd, cwd, label) {
 
 async function getRemote(dir) {
   try {
-    var proc = Bun.spawn(["git", "remote", "get-url", "origin"], {
-      cwd: dir,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    });
+    var proc = Bun.spawn(["git", "remote", "get-url", "origin"], { cwd: dir, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     await proc.exited;
-    var url = await new Response(proc.stdout).text();
-    return url.trim();
-  } catch {
-    return "";
-  }
+    return (await new Response(proc.stdout).text()).trim();
+  } catch { return ""; }
 }
 
 async function getLocalHead(dir) {
   try {
-    var proc = Bun.spawn(["git", "rev-parse", "HEAD"], {
-      cwd: dir, stdin: "ignore", stdout: "pipe", stderr: "ignore",
-    });
+    var proc = Bun.spawn(["git", "rev-parse", "HEAD"], { cwd: dir, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     await proc.exited;
     return (await new Response(proc.stdout).text()).trim();
   } catch { return ""; }
@@ -96,10 +94,8 @@ async function updateRepo(repo) {
   }
 
   var headBefore = await getLocalHead(dir);
-
   await run(["git", "fetch", "origin"], dir, "git fetch");
   await run(["git", "pull", "--ff-only"], dir, "git pull");
-
   var headAfter = await getLocalHead(dir);
   var changed = headBefore !== headAfter;
 
@@ -107,19 +103,12 @@ async function updateRepo(repo) {
   var destPath = join(PLUGIN_DIR, repo.pluginFile);
   var needsBuild = changed || !existsSync(outputPath) || !existsSync(destPath);
 
-  if (!needsBuild) {
-    log("No changes, skipping build");
-    return true;
-  }
+  if (!needsBuild) { log("No changes, skipping build"); return true; }
 
   log("Building (changed=" + changed + ")");
-
-  if (!await run(repo.install, dir, "install")) return false;
-  if (!await run(repo.build, dir, "build")) return false;
-
-  if (repo.bundle) {
-    if (!await run(repo.bundle, dir, "bundle")) return false;
-  }
+  if (repo.install && !await run(repo.install, dir, "install")) return false;
+  if (repo.build && !await run(repo.build, dir, "build")) return false;
+  if (repo.bundle && !await run(repo.bundle, dir, "bundle")) return false;
 
   if (existsSync(outputPath)) {
     try {
@@ -133,25 +122,16 @@ async function updateRepo(repo) {
     log("Output not found: " + outputPath);
     return false;
   }
-
   return true;
 }
 
 async function updateAll() {
   log("=== Plugin updater started ===");
-
-  if (!existsSync(REPOS_DIR)) {
-    try { mkdirSync(REPOS_DIR, { recursive: true }); } catch {}
-  }
-
+  if (!existsSync(REPOS_DIR)) { try { mkdirSync(REPOS_DIR, { recursive: true }); } catch {} }
+  if (!existsSync(PLUGIN_DIR)) { try { mkdirSync(PLUGIN_DIR, { recursive: true }); } catch {} log("Created plugin dir: " + PLUGIN_DIR); }
   for (var repo of REPOS) {
-    try {
-      await updateRepo(repo);
-    } catch (e) {
-      log(repo.name + " unexpected error: " + (e.message || e));
-    }
+    try { await updateRepo(repo); } catch (e) { log(repo.name + " unexpected error: " + (e.message || e)); }
   }
-
   log("=== Plugin updater finished ===");
 }
 
