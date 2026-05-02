@@ -1,8 +1,11 @@
+import { tool } from "@opencode-ai/plugin";
 import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 
-// Resolve config root by walking up from this file until plugins.json is found.
-// Works whether loaded from plugin/ or repos/opencode-plugin-updater/.
+// ---------------------------------------------------------------------------
+// Config resolution
+// ---------------------------------------------------------------------------
+
 function findConfigDir(start) {
   var dir = start;
   for (var i = 0; i < 5; i++) {
@@ -16,20 +19,27 @@ function findConfigDir(start) {
 
 var CONFIG_DIR = findConfigDir(import.meta.dir);
 var REPOS_DIR = join(CONFIG_DIR, "repos");
-var PLUGIN_DIR = join(CONFIG_DIR, "plugins");
+var PLUGINS_DIR = join(CONFIG_DIR, "plugins");
 var LOG_FILE = join(CONFIG_DIR, "plugin-updater.log");
-
 var PLUGINS_JSON = join(CONFIG_DIR, "plugins.json");
-var REPOS = [];
-try {
-  if (existsSync(PLUGINS_JSON)) {
-    REPOS = JSON.parse(readFileSync(PLUGINS_JSON, "utf-8"));
-  }
-} catch (e) {}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function loadPlugins() {
+  try {
+    if (existsSync(PLUGINS_JSON)) return JSON.parse(readFileSync(PLUGINS_JSON, "utf-8"));
+  } catch {}
+  return [];
+}
+
+function savePlugins(plugins) {
+  writeFileSync(PLUGINS_JSON, JSON.stringify(plugins, null, 2), "utf-8");
+}
 
 function ts() {
-  var d = new Date();
-  return d.toISOString().replace("T", " ").substring(0, 19);
+  return new Date().toISOString().replace("T", " ").substring(0, 19);
 }
 
 function log(msg) {
@@ -62,21 +72,33 @@ async function run(cmd, cwd, label) {
   }
 }
 
-async function getRemote(dir) {
+async function gitText(args, cwd) {
   try {
-    var proc = Bun.spawn(["git", "remote", "get-url", "origin"], { cwd: dir, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    var proc = Bun.spawn(args, { cwd: cwd, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     await proc.exited;
     return (await new Response(proc.stdout).text()).trim();
   } catch { return ""; }
 }
 
 async function getLocalHead(dir) {
-  try {
-    var proc = Bun.spawn(["git", "rev-parse", "HEAD"], { cwd: dir, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-    await proc.exited;
-    return (await new Response(proc.stdout).text()).trim();
-  } catch { return ""; }
+  return gitText(["git", "rev-parse", "HEAD"], dir);
 }
+
+async function getRemoteHead(dir) {
+  for (var ref of ["origin/HEAD", "origin/main", "origin/master"]) {
+    var h = await gitText(["git", "rev-parse", ref], dir);
+    if (h) return h;
+  }
+  return "";
+}
+
+async function getLastCommitSubject(dir) {
+  return gitText(["git", "log", "-1", "--format=%s"], dir);
+}
+
+// ---------------------------------------------------------------------------
+// Core update logic
+// ---------------------------------------------------------------------------
 
 async function updateRepo(repo) {
   var dir = join(REPOS_DIR, repo.name);
@@ -84,11 +106,12 @@ async function updateRepo(repo) {
 
   if (!existsSync(dir)) {
     log("Cloning " + repo.url);
-    if (!await run(["git", "clone", repo.url, repo.name], REPOS_DIR, "git clone " + repo.name)) return false;
+    if (!await run(["git", "clone", repo.url, repo.name], REPOS_DIR, "git clone " + repo.name)) {
+      return { success: false, error: "Clone failed" };
+    }
   } else {
-    var currentUrl = await getRemote(dir);
+    var currentUrl = await gitText(["git", "remote", "get-url", "origin"], dir);
     if (currentUrl && currentUrl !== repo.url && currentUrl !== repo.url.replace(".git", "")) {
-      log("Remote mismatch: " + currentUrl + " -> " + repo.url);
       await run(["git", "remote", "set-url", "origin", repo.url], dir, "set-url");
     }
   }
@@ -100,39 +123,166 @@ async function updateRepo(repo) {
   var changed = headBefore !== headAfter;
 
   var outputPath = join(dir, repo.output);
-  var destPath = join(PLUGIN_DIR, repo.pluginFile);
+  var destPath = join(PLUGINS_DIR, repo.pluginFile);
   var needsBuild = changed || !existsSync(outputPath) || !existsSync(destPath);
 
-  if (!needsBuild) { log("No changes, skipping build"); return true; }
+  if (!needsBuild) {
+    log("No changes, skipping build");
+    return { success: true, changed: false, commit: headAfter };
+  }
 
   log("Building (changed=" + changed + ")");
-  if (repo.install && !await run(repo.install, dir, "install")) return false;
-  if (repo.build && !await run(repo.build, dir, "build")) return false;
-  if (repo.bundle && !await run(repo.bundle, dir, "bundle")) return false;
+  if (repo.install && !await run(repo.install, dir, "install")) return { success: false, error: "Install failed" };
+  if (repo.build && !await run(repo.build, dir, "build")) return { success: false, error: "Build failed" };
+  if (repo.bundle && !await run(repo.bundle, dir, "bundle")) return { success: false, error: "Bundle failed" };
 
   if (existsSync(outputPath)) {
     try {
       copyFileSync(outputPath, destPath);
       log("Copied " + repo.output + " -> " + repo.pluginFile);
     } catch (e) {
-      log("Copy failed: " + (e.message || e));
-      return false;
+      return { success: false, error: "Copy failed: " + (e.message || e) };
     }
   } else {
-    log("Output not found: " + outputPath);
-    return false;
+    return { success: false, error: "Build output not found: " + repo.output };
   }
-  return true;
+  return { success: true, changed: true, commit: headAfter };
 }
 
-async function updateAll() {
-  log("=== Plugin updater started ===");
-  if (!existsSync(REPOS_DIR)) { try { mkdirSync(REPOS_DIR, { recursive: true }); } catch {} }
-  if (!existsSync(PLUGIN_DIR)) { try { mkdirSync(PLUGIN_DIR, { recursive: true }); } catch {} log("Created plugin dir: " + PLUGIN_DIR); }
-  for (var repo of REPOS) {
-    try { await updateRepo(repo); } catch (e) { log(repo.name + " unexpected error: " + (e.message || e)); }
+async function updateAll(onlyAutoUpdate) {
+  log("=== Plugin updater started (autoOnly=" + onlyAutoUpdate + ") ===");
+  if (!existsSync(REPOS_DIR)) try { mkdirSync(REPOS_DIR, { recursive: true }); } catch {}
+  if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
+
+  var plugins = loadPlugins();
+  var results = [];
+
+  for (var repo of plugins) {
+    if (onlyAutoUpdate && repo.autoUpdate === false) {
+      results.push({ name: repo.name, skipped: true, reason: "auto-update disabled" });
+      continue;
+    }
+    try {
+      var r = await updateRepo(repo);
+      results.push({ name: repo.name, ...r });
+    } catch (e) {
+      log(repo.name + " unexpected error: " + (e.message || e));
+      results.push({ name: repo.name, success: false, error: String(e.message || e) });
+    }
   }
+
   log("=== Plugin updater finished ===");
+  return results;
 }
 
-updateAll().catch(function() {});
+// ---------------------------------------------------------------------------
+// Background auto-update on load
+// ---------------------------------------------------------------------------
+
+setTimeout(function () { updateAll(true).catch(function () {}); }, 0);
+
+// ---------------------------------------------------------------------------
+// OpenCode plugin export
+// ---------------------------------------------------------------------------
+
+export default async function PluginUpdater(ctx) {
+  return {
+    tool: {
+
+      plugin_list: tool({
+        description:
+          "List all managed plugins with their status: auto-update setting, current local commit, whether an update is available, and deploy status.",
+        args: {},
+        async execute() {
+          var plugins = loadPlugins();
+          if (!plugins.length) return "No plugins configured in plugins.json.";
+
+          var lines = [];
+          for (var repo of plugins) {
+            var dir = join(REPOS_DIR, repo.name);
+            var autoUpdate = repo.autoUpdate !== false;
+            var installed = existsSync(dir);
+            var deployed = existsSync(join(PLUGINS_DIR, repo.pluginFile));
+            var localHead = "";
+            var remoteHead = "";
+            var subject = "";
+            var updateAvailable = false;
+
+            if (installed) {
+              await run(["git", "fetch", "origin"], dir, "fetch " + repo.name);
+              localHead = await getLocalHead(dir);
+              remoteHead = await getRemoteHead(dir);
+              subject = await getLastCommitSubject(dir);
+              updateAvailable = !!(localHead && remoteHead && localHead !== remoteHead);
+            }
+
+            var s = repo.name;
+            s += "\n  Auto-update : " + (autoUpdate ? "on" : "OFF");
+            s += "\n  Installed   : " + (installed ? "yes" : "no");
+            s += "\n  Deployed    : " + (deployed ? "yes" : "no");
+            if (localHead) s += "\n  Commit      : " + localHead.substring(0, 8) + " " + subject;
+            if (updateAvailable) s += "\n  ** UPDATE AVAILABLE ** (remote " + remoteHead.substring(0, 8) + ")";
+            s += "\n  Source      : " + repo.url;
+            lines.push(s);
+          }
+          return lines.join("\n\n");
+        },
+      }),
+
+      plugin_update: tool({
+        description:
+          "Update a specific plugin or all plugins. Pulls latest code from git, rebuilds if the plugin has build steps, and deploys the output to the plugins directory. A restart of OpenCode is required for changes to take effect.",
+        args: {
+          name: tool.schema
+            .string()
+            .optional()
+            .describe("Name of a single plugin to update. Omit to update ALL plugins."),
+        },
+        async execute(args) {
+          var plugins = loadPlugins();
+          if (!plugins.length) return "No plugins configured in plugins.json.";
+
+          if (args.name) {
+            var repo = plugins.find(function (p) { return p.name === args.name; });
+            if (!repo)
+              return "Plugin not found: " + args.name + "\nAvailable: " + plugins.map(function (p) { return p.name; }).join(", ");
+
+            var r = await updateRepo(repo);
+            if (!r.success) return "FAILED to update " + args.name + ": " + r.error;
+            if (!r.changed) return args.name + " is already up to date (commit " + (r.commit || "").substring(0, 8) + ").";
+            return "Updated " + args.name + " to " + (r.commit || "").substring(0, 8) + ". Restart OpenCode to apply.";
+          }
+
+          var results = await updateAll(false);
+          var out = results.map(function (r) {
+            if (r.skipped) return r.name + ": skipped (" + r.reason + ")";
+            if (!r.success) return r.name + ": FAILED (" + r.error + ")";
+            if (!r.changed) return r.name + ": up to date";
+            return r.name + ": updated -> " + (r.commit || "").substring(0, 8);
+          });
+          return out.join("\n") + "\n\nRestart OpenCode to apply changes.";
+        },
+      }),
+
+      plugin_auto_update: tool({
+        description:
+          "Enable or disable automatic updates for a plugin. When disabled, the plugin will only be updated when you explicitly call the plugin_update tool. The setting is persisted to plugins.json.",
+        args: {
+          name: tool.schema.string().describe("Plugin name."),
+          enabled: tool.schema.boolean().describe("true = enable auto-update, false = disable."),
+        },
+        async execute(args) {
+          var plugins = loadPlugins();
+          var repo = plugins.find(function (p) { return p.name === args.name; });
+          if (!repo)
+            return "Plugin not found: " + args.name + "\nAvailable: " + plugins.map(function (p) { return p.name; }).join(", ");
+
+          repo.autoUpdate = args.enabled;
+          savePlugins(plugins);
+          return "Auto-update for " + args.name + " is now " + (args.enabled ? "ENABLED" : "DISABLED") + ".";
+        },
+      }),
+
+    },
+  };
+}
