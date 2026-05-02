@@ -16,7 +16,7 @@ function findConfigDir(start) {
 
 var CONFIG_DIR = findConfigDir(import.meta.dir);
 var REPOS_DIR = join(CONFIG_DIR, "repos");
-var PLUGIN_DIR = join(CONFIG_DIR, "plugin");
+var PLUGIN_DIR = join(CONFIG_DIR, "plugins");
 var LOG_FILE = join(CONFIG_DIR, "plugin-updater.log");
 
 var PLUGINS_JSON = join(CONFIG_DIR, "plugins.json");
