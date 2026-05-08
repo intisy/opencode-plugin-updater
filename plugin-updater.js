@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin";
-import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "fs";
 import { join, dirname } from "path";
 
 // ---------------------------------------------------------------------------
@@ -99,6 +99,12 @@ async function getLastCommitSubject(dir) {
 // ---------------------------------------------------------------------------
 // Core update logic
 // ---------------------------------------------------------------------------
+
+function getFolderName(repo) {
+  var match = (repo.url || "").match(/github\.com\/([^\/]+)\/([^\/\.]+)/);
+  if (match) return match[1] + "-" + repo.name;
+  return repo.name;
+}
 
 async function updateRepo(repo) {
   var dir = join(REPOS_DIR, repo.name);
