@@ -102,7 +102,7 @@ async function getLastCommitSubject(dir) {
 
 function getFolderName(repo) {
   var match = (repo.url || "").match(/github\.com\/([^\/]+)\/([^\/\.]+)/);
-  if (match) return match[1] + "-" + repo.name;
+  if (match) return match[1] + "/" + repo.name;
   return repo.name;
 }
 
