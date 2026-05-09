@@ -106,26 +106,50 @@ function getFolderName(repo) {
   return repo.name;
 }
 
+async function ensureCloned(repo) {
+  var folderName = getFolderName(repo);
+  var dir = join(REPOS_DIR, folderName);
+
+  if (existsSync(dir)) return dir;
+
+  var parentDir = dirname(dir);
+  if (!existsSync(parentDir)) {
+    try { mkdirSync(parentDir, { recursive: true }); } catch(e){}
+  }
+  log("Cloning " + repo.url + " -> " + folderName);
+  if (!await run(["git", "clone", repo.url, folderName], REPOS_DIR, "git clone " + folderName)) {
+    return null;
+  }
+
+  // Initial build + deploy after first clone
+  if (repo.install) await run(repo.install, dir, "install");
+  if (repo.build) await run(repo.build, dir, "build");
+  if (repo.bundle) await run(repo.bundle, dir, "bundle");
+  var outputPath = join(dir, repo.output);
+  var destPath = join(PLUGINS_DIR, repo.pluginFile);
+  if (existsSync(outputPath)) {
+    try { copyFileSync(outputPath, destPath); log("Copied " + repo.output + " -> " + repo.pluginFile); } catch(e){}
+  }
+
+  return dir;
+}
+
 async function updateRepo(repo) {
   var folderName = getFolderName(repo);
   var dir = join(REPOS_DIR, folderName);
-  
+
   log("--- " + folderName + " ---");
 
   if (!existsSync(dir)) {
-    var parentDir = dirname(dir);
-    if (!existsSync(parentDir)) {
-      try { mkdirSync(parentDir, { recursive: true }); } catch(e){}
-    }
-    log("Cloning " + repo.url);
-    if (!await run(["git", "clone", repo.url, folderName], REPOS_DIR, "git clone " + folderName)) {
-      return { success: false, error: "Clone failed" };
-    }
-  } else {
-    var currentUrl = await gitText(["git", "remote", "get-url", "origin"], dir);
-    if (currentUrl && currentUrl !== repo.url && currentUrl !== repo.url.replace(".git", "")) {
-      await run(["git", "remote", "set-url", "origin", repo.url], dir, "set-url");
-    }
+    var clonedDir = await ensureCloned(repo);
+    if (!clonedDir) return { success: false, error: "Clone failed" };
+    var head = await getLocalHead(clonedDir);
+    return { success: true, changed: true, commit: head };
+  }
+
+  var currentUrl = await gitText(["git", "remote", "get-url", "origin"], dir);
+  if (currentUrl && currentUrl !== repo.url && currentUrl !== repo.url.replace(".git", "")) {
+    await run(["git", "remote", "set-url", "origin", repo.url], dir, "set-url");
   }
 
   var headBefore = await getLocalHead(dir);
@@ -171,6 +195,13 @@ async function updateAll(onlyAutoUpdate) {
 
   for (var repo of plugins) {
     if (onlyAutoUpdate && repo.autoUpdate === false) {
+      // FIX: Still clone + build if folder doesn't exist, just skip update/pull
+      var manualFolder = getFolderName(repo);
+      var manualDir = join(REPOS_DIR, manualFolder);
+      if (!existsSync(manualDir)) {
+        log("Initial clone for manual plugin: " + manualFolder);
+        await ensureCloned(repo);
+      }
       results.push({ name: repo.name, skipped: true, reason: "auto-update disabled" });
       continue;
     }
@@ -188,10 +219,14 @@ async function updateAll(onlyAutoUpdate) {
 }
 
 // ---------------------------------------------------------------------------
-// Background auto-update on load
+// Background auto-update on load (with guard against dual execution)
 // ---------------------------------------------------------------------------
 
-setTimeout(function () { updateAll(true).catch(function () {}); }, 0);
+setTimeout(function () {
+  if (globalThis.__pluginUpdaterAutoRan) return;
+  globalThis.__pluginUpdaterAutoRan = true;
+  updateAll(true).catch(function () {});
+}, 0);
 
 // ---------------------------------------------------------------------------
 // OpenCode plugin export
@@ -211,7 +246,8 @@ export default async function PluginUpdater(ctx) {
 
           var lines = [];
           for (var repo of plugins) {
-            var dir = join(REPOS_DIR, repo.name);
+            // FIX: Use getFolderName instead of repo.name for correct directory lookup
+            var dir = join(REPOS_DIR, getFolderName(repo));
             var autoUpdate = repo.autoUpdate !== false;
             var installed = existsSync(dir);
             var deployed = existsSync(join(PLUGINS_DIR, repo.pluginFile));
