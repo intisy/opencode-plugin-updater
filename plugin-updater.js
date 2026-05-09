@@ -107,12 +107,18 @@ function getFolderName(repo) {
 }
 
 async function updateRepo(repo) {
-  var dir = join(REPOS_DIR, repo.name);
-  log("--- " + repo.name + " ---");
+  var folderName = getFolderName(repo);
+  var dir = join(REPOS_DIR, folderName);
+  
+  log("--- " + folderName + " ---");
 
   if (!existsSync(dir)) {
+    var parentDir = dirname(dir);
+    if (!existsSync(parentDir)) {
+      try { mkdirSync(parentDir, { recursive: true }); } catch(e){}
+    }
     log("Cloning " + repo.url);
-    if (!await run(["git", "clone", repo.url, repo.name], REPOS_DIR, "git clone " + repo.name)) {
+    if (!await run(["git", "clone", repo.url, folderName], REPOS_DIR, "git clone " + folderName)) {
       return { success: false, error: "Clone failed" };
     }
   } else {
