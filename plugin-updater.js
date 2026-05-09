@@ -66,8 +66,6 @@ function loadPlugins() {
 function savePlugins(plugins) {
   if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
   writeFileSync(PLUGINS_JSON, JSON.stringify(plugins, null, 2), "utf-8");
-  // Also write to legacy location for backward compat
-  try { writeFileSync(join(CONFIG_DIR, "plugins.json"), JSON.stringify(plugins, null, 2), "utf-8"); } catch {}
 }
 
 function ts() {
