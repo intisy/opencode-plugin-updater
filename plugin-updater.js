@@ -9,6 +9,8 @@ import { join, dirname } from "path";
 function findConfigDir(start) {
   var dir = start;
   for (var i = 0; i < 5; i++) {
+    if (existsSync(join(dir, "opencode.json"))) return dir;
+    if (existsSync(join(dir, "config", "plugins.json"))) return dir;
     if (existsSync(join(dir, "plugins.json"))) return dir;
     var parent = dirname(dir);
     if (parent === dir) break;
@@ -18,10 +20,35 @@ function findConfigDir(start) {
 }
 
 var CONFIG_DIR = findConfigDir(import.meta.dir);
+var LOGS_DIR = join(CONFIG_DIR, "logs");
+var CONFIG_FOLDER = join(CONFIG_DIR, "config");
 var REPOS_DIR = join(CONFIG_DIR, "repos");
 var PLUGINS_DIR = join(CONFIG_DIR, "plugins");
-var LOG_FILE = join(CONFIG_DIR, "plugin-updater.log");
-var PLUGINS_JSON = join(CONFIG_DIR, "plugins.json");
+var LOG_FILE = join(LOGS_DIR, "plugin-updater.log");
+var PLUGINS_JSON = join(CONFIG_FOLDER, "plugins.json");
+
+// ---------------------------------------------------------------------------
+// Migration: move legacy files to new locations
+// ---------------------------------------------------------------------------
+
+function migrateToNewPaths() {
+  if (!existsSync(LOGS_DIR)) try { mkdirSync(LOGS_DIR, { recursive: true }); } catch {}
+  if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
+
+  // Migrate plugins.json from root to config/
+  var legacyPluginsJson = join(CONFIG_DIR, "plugins.json");
+  if (existsSync(legacyPluginsJson) && !existsSync(PLUGINS_JSON)) {
+    try { copyFileSync(legacyPluginsJson, PLUGINS_JSON); } catch {}
+  }
+
+  // Migrate plugin-updater.log from root to logs/
+  var legacyLog = join(CONFIG_DIR, "plugin-updater.log");
+  if (existsSync(legacyLog) && !existsSync(LOG_FILE)) {
+    try { renameSync(legacyLog, LOG_FILE); } catch {}
+  }
+}
+
+migrateToNewPaths();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,12 +57,17 @@ var PLUGINS_JSON = join(CONFIG_DIR, "plugins.json");
 function loadPlugins() {
   try {
     if (existsSync(PLUGINS_JSON)) return JSON.parse(readFileSync(PLUGINS_JSON, "utf-8"));
+    var legacy = join(CONFIG_DIR, "plugins.json");
+    if (existsSync(legacy)) return JSON.parse(readFileSync(legacy, "utf-8"));
   } catch {}
   return [];
 }
 
 function savePlugins(plugins) {
+  if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
   writeFileSync(PLUGINS_JSON, JSON.stringify(plugins, null, 2), "utf-8");
+  // Also write to legacy location for backward compat
+  try { writeFileSync(join(CONFIG_DIR, "plugins.json"), JSON.stringify(plugins, null, 2), "utf-8"); } catch {}
 }
 
 function ts() {
@@ -44,6 +76,7 @@ function ts() {
 
 function log(msg) {
   try {
+    if (!existsSync(LOGS_DIR)) try { mkdirSync(LOGS_DIR, { recursive: true }); } catch {}
     var line = "[" + ts() + "] " + msg + "\n";
     var prev = "";
     try { prev = readFileSync(LOG_FILE, "utf-8"); } catch {}
@@ -121,7 +154,6 @@ async function ensureCloned(repo) {
     return null;
   }
 
-  // Initial build + deploy after first clone
   if (repo.install) await run(repo.install, dir, "install");
   if (repo.build) await run(repo.build, dir, "build");
   if (repo.bundle) await run(repo.bundle, dir, "bundle");
@@ -195,7 +227,6 @@ async function updateAll(onlyAutoUpdate) {
 
   for (var repo of plugins) {
     if (onlyAutoUpdate && repo.autoUpdate === false) {
-      // FIX: Still clone + build if folder doesn't exist, just skip update/pull
       var manualFolder = getFolderName(repo);
       var manualDir = join(REPOS_DIR, manualFolder);
       if (!existsSync(manualDir)) {
@@ -239,14 +270,15 @@ export default async function PluginUpdater(ctx) {
       plugin_list: tool({
         description:
           "List all managed plugins with their status: auto-update setting, current local commit, whether an update is available, and deploy status.",
-        args: {},
+        args: {
+          _placeholder: tool.schema.boolean().describe("Placeholder. Always pass true."),
+        },
         async execute() {
           var plugins = loadPlugins();
           if (!plugins.length) return "No plugins configured in plugins.json.";
 
           var lines = [];
           for (var repo of plugins) {
-            // FIX: Use getFolderName instead of repo.name for correct directory lookup
             var dir = join(REPOS_DIR, getFolderName(repo));
             var autoUpdate = repo.autoUpdate !== false;
             var installed = existsSync(dir);
