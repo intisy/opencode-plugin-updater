@@ -2,7 +2,7 @@
 
 Auto-update plugin for [OpenCode](https://github.com/sst/opencode).
 
-Reads `plugins.json` from the config directory, clones/pulls each plugin repo, runs the configured build steps, and copies the output to the plugin directory on every OpenCode startup.
+Reads `config/plugins.json`, clones/pulls each plugin repo, runs configured build steps, and copies the output to the plugin directory on every OpenCode startup.
 
 ## Features
 
@@ -16,39 +16,21 @@ Reads `plugins.json` from the config directory, clones/pulls each plugin repo, r
 
 ## Installation
 
-### 1. Add the plugin entry
+### Option A — npm (recommended)
 
-Add the following object to the array in `~/.config/opencode/config/plugins.json` (create the file if it doesn't exist):
-
-```json
-{
-  "name": "opencode-plugin-updater",
-  "url": "https://github.com/intisy/opencode-plugin-updater.git",
-  "install": null,
-  "build": null,
-  "bundle": null,
-  "output": "plugin-updater.js",
-  "pluginFile": "plugin-updater.js",
-  "autoUpdate": true
-}
-```
-
-### 2. Register the plugin in OpenCode
-
-Add an entry to `~/.config/opencode/opencode.json` under the `plugins` key:
+Add the package to your `~/.config/opencode/opencode.json`:
 
 ```jsonc
 {
-  "plugins": {
-    "plugin-updater": "./plugins/plugin-updater.js"
-    // ...other plugins
-  }
+  "plugins": ["opencode-plugin-updater@latest"]
 }
 ```
 
-### 3. Bootstrap (first time only)
+Restart OpenCode. The plugin is loaded directly from npm — no cloning or building required.
 
-Clone the repo and copy the plugin file manually:
+### Option B — Manual bootstrap
+
+1. Clone the repo:
 
 ```bash
 mkdir -p ~/.config/opencode/repos/intisy/opencode-plugin-updater
@@ -56,9 +38,21 @@ git clone https://github.com/intisy/opencode-plugin-updater.git ~/.config/openco
 cp ~/.config/opencode/repos/intisy/opencode-plugin-updater/plugin-updater.js ~/.config/opencode/plugins/plugin-updater.js
 ```
 
-After the first manual setup, restart OpenCode. The plugin will keep itself (and all other plugins) up to date automatically from then on.
+2. Register the plugin in `~/.config/opencode/opencode.json`:
+
+```jsonc
+{
+  "plugins": {
+    "plugin-updater": "./plugins/plugin-updater.js"
+  }
+}
+```
+
+Restart OpenCode. The plugin will keep itself (and all other plugins) up to date automatically from then on.
 
 ## plugins.json Format
+
+Create `~/.config/opencode/config/plugins.json` with an array of plugin entries:
 
 ```json
 [
@@ -82,28 +76,17 @@ After the first manual setup, restart OpenCode. The plugin will keep itself (and
 | `install` | string[] \| null | Install command (e.g. `["bun", "install"]`) |
 | `build` | string[] \| null | Build command (e.g. `["bun", "run", "build"]`) |
 | `bundle` | string[] \| null | Bundle command (optional second build step) |
-| `output` | string | Path to the built file, relative to the repo root |
-| `pluginFile` | string | Filename in the `plugins/` directory |
-| `autoUpdate` | boolean | Whether to update automatically on startup |
+| `output` | string | Path to the built plugin file inside the repo |
+| `pluginFile` | string | Filename to use in the `plugins/` directory |
+| `autoUpdate` | boolean | Whether to auto-update on startup |
 
-## Exposed Tools
+## Tools
 
 | Tool | Description |
 |------|-------------|
-| `plugin_list` | List all plugins with status, commit, and update availability |
-| `plugin_update` | Update a single plugin by name, or all plugins at once |
-| `plugin_auto_update` | Toggle auto-update on/off for a specific plugin |
-
-## Publishing (maintainer)
-
-This package auto-publishes to npm when a version tag is pushed:
-
-```bash
-npm version patch   # or minor / major
-git push && git push --tags
-```
-
-A GitHub Actions workflow handles the rest. The `NPM_TOKEN` secret must be configured in the repository settings.
+| `plugin_list` | List all managed plugins with status, commit, and update availability |
+| `plugin_update` | Pull, rebuild, and deploy a single plugin (or all) |
+| `plugin_auto_update` | Toggle auto-update for a specific plugin |
 
 ## License
 
