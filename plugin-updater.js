@@ -23,7 +23,7 @@ var CONFIG_DIR = findConfigDir(import.meta.dir);
 var LOGS_DIR = join(CONFIG_DIR, "logs");
 var CONFIG_FOLDER = join(CONFIG_DIR, "config");
 var REPOS_DIR = join(CONFIG_DIR, "repos");
-var PLUGINS_DIR = join(CONFIG_DIR, "plugins");
+var PLUGINS_DIR = join(CONFIG_DIR, "plugin");
 var LOG_FILE = join(LOGS_DIR, "plugin-updater.log");
 var PLUGINS_JSON = join(CONFIG_FOLDER, "plugins.json");
 
@@ -148,9 +148,12 @@ async function ensureCloned(repo) {
     try { mkdirSync(parentDir, { recursive: true }); } catch(e){}
   }
   log("Cloning " + repo.url + " -> " + folderName);
-  if (!await run(["git", "clone", repo.url, folderName], REPOS_DIR, "git clone " + folderName)) {
-    return null;
-  }
+  var cloneArgs = repo.branch
+      ? ["git", "clone", "--branch", repo.branch, repo.url, folderName]
+      : ["git", "clone", repo.url, folderName];
+    if (!await run(cloneArgs, REPOS_DIR, "git clone " + folderName)) {
+      return null;
+    }
 
   if (repo.install) await run(repo.install, dir, "install");
   if (repo.build) await run(repo.build, dir, "build");
@@ -184,7 +187,12 @@ async function updateRepo(repo) {
 
   var headBefore = await getLocalHead(dir);
   await run(["git", "fetch", "origin"], dir, "git fetch");
-  await run(["git", "pull", "--ff-only"], dir, "git pull");
+  if (repo.branch) {
+      await run(["git", "checkout", repo.branch], dir, "git checkout");
+      await run(["git", "pull", "--ff-only", "origin", repo.branch], dir, "git pull");
+    } else {
+      await run(["git", "pull", "--ff-only"], dir, "git pull");
+    }
   var headAfter = await getLocalHead(dir);
   var changed = headBefore !== headAfter;
 
@@ -364,3 +372,5 @@ export default async function PluginUpdater(ctx) {
     },
   };
 }
+
+export const server = PluginUpdater;
