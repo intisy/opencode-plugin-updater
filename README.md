@@ -78,6 +78,7 @@ Create `~/.config/opencode/config/plugins.json` with an array of plugin entries:
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Plugin identifier (used as repo folder name) |
+| `branch` | string \| null | Git branch to clone/pull (defaults to default branch) |
 | `url` | string | Git clone URL |
 | `install` | string[] \| null | Install command (e.g. `["bun", "install"]`) |
 | `build` | string[] \| null | Build command (e.g. `["bun", "run", "build"]`) |
