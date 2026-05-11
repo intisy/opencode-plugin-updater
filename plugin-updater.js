@@ -233,15 +233,33 @@ async function updateAll(onlyAutoUpdate) {
 
   for (var repo of plugins) {
     if (onlyAutoUpdate && repo.autoUpdate === false) {
-      var manualFolder = getFolderName(repo);
-      var manualDir = join(REPOS_DIR, manualFolder);
-      if (!existsSync(manualDir)) {
-        log("Initial clone for manual plugin: " + manualFolder);
-        await ensureCloned(repo);
-      }
-      results.push({ name: repo.name, skipped: true, reason: "auto-update disabled" });
-      continue;
-    }
+          var manualFolder = getFolderName(repo);
+          var manualDir = join(REPOS_DIR, manualFolder);
+          if (!existsSync(manualDir)) {
+            log("Initial clone for manual plugin: " + manualFolder);
+            await ensureCloned(repo);
+          } else {
+            // Repo exists but plugin file may be missing (e.g. plugin/ dir was deleted)
+            if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
+                    var manualDest = join(PLUGINS_DIR, repo.pluginFile);
+            if (!existsSync(manualDest)) {
+              var manualOutput = join(manualDir, repo.output);
+              if (existsSync(manualOutput)) {
+                try { copyFileSync(manualOutput, manualDest); log("Restored " + repo.pluginFile); } catch(e) {}
+              } else {
+                // Output missing too — need to rebuild
+                if (repo.install) await run(repo.install, manualDir, "install");
+                if (repo.build) await run(repo.build, manualDir, "build");
+                if (repo.bundle) await run(repo.bundle, manualDir, "bundle");
+                if (existsSync(manualOutput)) {
+                  try { copyFileSync(manualOutput, manualDest); log("Rebuilt and restored " + repo.pluginFile); } catch(e) {}
+                }
+              }
+            }
+          }
+          results.push({ name: repo.name, skipped: true, reason: "auto-update disabled" });
+          continue;
+        }
     try {
       var r = await updateRepo(repo);
       results.push({ name: repo.name, ...r });
