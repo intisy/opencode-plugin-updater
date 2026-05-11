@@ -1,5 +1,11 @@
 # opencode-plugin-updater
 
+
+[![npm version](https://img.shields.io/npm/v/opencode-plugin-updater)](https://www.npmjs.com/package/opencode-plugin-updater)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-plugin-updater)](https://www.npmjs.com/package/opencode-plugin-updater)
+[![CI](https://github.com/intisy/opencode-plugin-updater/actions/workflows/publish.yml/badge.svg)](https://github.com/intisy/opencode-plugin-updater/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Auto-update plugin for [OpenCode](https://github.com/sst/opencode).
 
 Reads `config/plugins.json`, clones/pulls each plugin repo, runs configured build steps, and copies the output to the plugin directory on every OpenCode startup.
