@@ -23,7 +23,7 @@ var CONFIG_DIR = findConfigDir(import.meta.dir);
 var LOGS_DIR = join(CONFIG_DIR, "logs");
 var CONFIG_FOLDER = join(CONFIG_DIR, "config");
 var REPOS_DIR = join(CONFIG_DIR, "repos");
-var PLUGINS_DIR = join(CONFIG_DIR, "plugins");
+var PLUGINS_DIR = join(CONFIG_DIR, "plugin");
 var LOG_FILE = join(LOGS_DIR, "plugin-updater.log");
 var PLUGINS_JSON = join(CONFIG_FOLDER, "plugins.json");
 
@@ -148,9 +148,12 @@ async function ensureCloned(repo) {
     try { mkdirSync(parentDir, { recursive: true }); } catch(e){}
   }
   log("Cloning " + repo.url + " -> " + folderName);
-  if (!await run(["git", "clone", repo.url, folderName], REPOS_DIR, "git clone " + folderName)) {
-    return null;
-  }
+  var cloneArgs = repo.branch
+      ? ["git", "clone", "--branch", repo.branch, repo.url, folderName]
+      : ["git", "clone", repo.url, folderName];
+    if (!await run(cloneArgs, REPOS_DIR, "git clone " + folderName)) {
+      return null;
+    }
 
   if (repo.install) await run(repo.install, dir, "install");
   if (repo.build) await run(repo.build, dir, "build");
@@ -184,7 +187,12 @@ async function updateRepo(repo) {
 
   var headBefore = await getLocalHead(dir);
   await run(["git", "fetch", "origin"], dir, "git fetch");
-  await run(["git", "pull", "--ff-only"], dir, "git pull");
+  if (repo.branch) {
+      await run(["git", "checkout", repo.branch], dir, "git checkout");
+      await run(["git", "pull", "--ff-only", "origin", repo.branch], dir, "git pull");
+    } else {
+      await run(["git", "pull", "--ff-only"], dir, "git pull");
+    }
   var headAfter = await getLocalHead(dir);
   var changed = headBefore !== headAfter;
 
@@ -225,15 +233,33 @@ async function updateAll(onlyAutoUpdate) {
 
   for (var repo of plugins) {
     if (onlyAutoUpdate && repo.autoUpdate === false) {
-      var manualFolder = getFolderName(repo);
-      var manualDir = join(REPOS_DIR, manualFolder);
-      if (!existsSync(manualDir)) {
-        log("Initial clone for manual plugin: " + manualFolder);
-        await ensureCloned(repo);
-      }
-      results.push({ name: repo.name, skipped: true, reason: "auto-update disabled" });
-      continue;
-    }
+          var manualFolder = getFolderName(repo);
+          var manualDir = join(REPOS_DIR, manualFolder);
+          if (!existsSync(manualDir)) {
+            log("Initial clone for manual plugin: " + manualFolder);
+            await ensureCloned(repo);
+          } else {
+            // Repo exists but plugin file may be missing (e.g. plugin/ dir was deleted)
+            if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
+                    var manualDest = join(PLUGINS_DIR, repo.pluginFile);
+            if (!existsSync(manualDest)) {
+              var manualOutput = join(manualDir, repo.output);
+              if (existsSync(manualOutput)) {
+                try { copyFileSync(manualOutput, manualDest); log("Restored " + repo.pluginFile); } catch(e) {}
+              } else {
+                // Output missing too — need to rebuild
+                if (repo.install) await run(repo.install, manualDir, "install");
+                if (repo.build) await run(repo.build, manualDir, "build");
+                if (repo.bundle) await run(repo.bundle, manualDir, "bundle");
+                if (existsSync(manualOutput)) {
+                  try { copyFileSync(manualOutput, manualDest); log("Rebuilt and restored " + repo.pluginFile); } catch(e) {}
+                }
+              }
+            }
+          }
+          results.push({ name: repo.name, skipped: true, reason: "auto-update disabled" });
+          continue;
+        }
     try {
       var r = await updateRepo(repo);
       results.push({ name: repo.name, ...r });
@@ -364,3 +390,5 @@ export default async function PluginUpdater(ctx) {
     },
   };
 }
+
+export const server = PluginUpdater;
