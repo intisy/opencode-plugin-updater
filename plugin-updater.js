@@ -131,6 +131,32 @@ async function getLastCommitSubject(dir) {
 // Core update logic
 // ---------------------------------------------------------------------------
 
+
+function updateNpmPlugins() {
+  var ocPath = join(CONFIG_DIR, 'opencode.json');
+  var updateCheckPath = join(CACHE_DIR, 'updater-npm-check');
+  try {
+    if (existsSync(updateCheckPath)) {
+      var lastCheck = parseInt(readFileSync(updateCheckPath, 'utf-8').trim(), 10);
+      if (Date.now() - lastCheck < 86400000) return;
+    }
+    if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+    writeFileSync(updateCheckPath, String(Date.now()));
+
+    if (existsSync(ocPath)) {
+      var oc = JSON.parse(readFileSync(ocPath, 'utf-8'));
+      var pluginsArr = oc.plugin || oc.plugins || [];
+      var npmPlugs = pluginsArr.filter(p => typeof p === 'string' && p.includes('@latest') && !p.startsWith('.'));
+      if (npmPlugs.length > 0) {
+        log('Auto-updating NPM plugins: ' + npmPlugs.join(', '));
+        execSync('npm install --no-save ' + npmPlugs.join(' '), { cwd: CONFIG_DIR, stdio: 'ignore', timeout: 120000 });
+      }
+    }
+  } catch (e) {
+    log('Failed NPM update: ' + e.message);
+  }
+}
+
 function getFolderName(repo) {
   var match = (repo.url || "").match(/github\.com\/([^\/]+)\/([^\/\.]+)/);
   if (match) return match[1] + "/" + repo.name;
@@ -225,6 +251,7 @@ async function updateRepo(repo) {
 
 async function updateAll(onlyAutoUpdate) {
   log("=== Plugin updater started (autoOnly=" + onlyAutoUpdate + ") ===");
+  updateNpmPlugins();
   if (!existsSync(REPOS_DIR)) try { mkdirSync(REPOS_DIR, { recursive: true }); } catch {}
   if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
 
