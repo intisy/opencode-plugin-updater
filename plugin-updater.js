@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin";
-import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "fs";
+import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ function migrateToNewPaths() {
   // Migrate plugins.json from root to config/
   var legacyPluginsJson = join(CONFIG_DIR, "plugins.json");
   if (existsSync(legacyPluginsJson) && !existsSync(PLUGINS_JSON)) {
-    try { copyFileSync(legacyPluginsJson, PLUGINS_JSON); } catch {}
+    try { copyFileSync(legacyPluginsJson, PLUGINS_JSON); try { unlinkSync(legacyPluginsJson); } catch {} } catch {}
   }
 
   // Migrate plugin-updater.log from root to logs/
@@ -161,6 +161,7 @@ async function ensureCloned(repo) {
   if (repo.bundle) await run(repo.bundle, dir, "bundle");
   var outputPath = join(dir, repo.output);
   var destPath = join(PLUGINS_DIR, repo.pluginFile);
+  if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}\r
   if (existsSync(outputPath)) {
     try { copyFileSync(outputPath, destPath); log("Copied " + repo.output + " -> " + repo.pluginFile); } catch(e){}
   }
@@ -212,6 +213,7 @@ async function updateRepo(repo) {
   if (repo.build && !await run(repo.build, dir, "build")) return { success: false, error: "Build failed" };
   if (repo.bundle && !await run(repo.bundle, dir, "bundle")) return { success: false, error: "Bundle failed" };
 
+  if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}\r
   if (existsSync(outputPath)) {
     try {
       copyFileSync(outputPath, destPath);
