@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 
 // ---------------------------------------------------------------------------
@@ -284,9 +285,46 @@ function updateAll(onlyAutoUpdate) {
 // Background auto-update on load (with guard against dual execution)
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// Self-update: check npm for a newer version and install into opencode cache
+// ---------------------------------------------------------------------------
+
+function selfUpdate() {
+  try {
+    var selfDir = dirname(fileURLToPath(import.meta.url));
+    var selfPkg = join(selfDir, "package.json");
+    if (!existsSync(selfPkg)) return;
+    var currentVersion = JSON.parse(readFileSync(selfPkg, "utf-8")).version || "";
+    if (!currentVersion) return;
+
+    var latestResult = spawnSync("npm", ["view", "opencode-plugin-updater", "version"], { encoding: "utf-8", timeout: 15000 });
+    var latest = (latestResult.stdout || "").trim();
+    if (!latest || latest === currentVersion) return;
+
+    // Compare semver numerically
+    var cur = currentVersion.split(".").map(Number);
+    var lat = latest.split(".").map(Number);
+    var isNewer = lat[0] > cur[0] || (lat[0] === cur[0] && lat[1] > cur[1]) || (lat[0] === cur[0] && lat[1] === cur[1] && lat[2] > cur[2]);
+    if (!isNewer) return;
+
+    log("Self-update: " + currentVersion + " -> " + latest);
+    var cacheDir = join(dirname(dirname(selfDir))); // ~/.cache/opencode
+    var result = spawnSync("npm", ["install", "opencode-plugin-updater@latest"], { cwd: cacheDir, encoding: "utf-8", timeout: 60000 });
+    if (result.status === 0) {
+      log("Self-update OK: installed " + latest + " (restart OpenCode to load)");
+    } else {
+      log("Self-update FAILED: " + (result.stderr || "").substring(0, 200));
+    }
+  } catch (e) {
+    log("Self-update ERROR: " + (e.message || e));
+  }
+}
+
 setTimeout(function () {
   if (globalThis.__pluginUpdaterAutoRan) return;
   globalThis.__pluginUpdaterAutoRan = true;
+  try { selfUpdate(); } catch {}
   try { updateAll(true); } catch {};
 }, 0);
 
