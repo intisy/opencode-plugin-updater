@@ -1,6 +1,6 @@
 {
   "name": "opencode-plugin-updater",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Auto-update plugin for OpenCode - reads plugins.json and keeps plugin repos up to date",
   "main": "plugin-updater.js",
   "type": "module",
