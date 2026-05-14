@@ -1,27 +1,27 @@
 {
-    "name":  "opencode-plugin-updater",
-    "version":  "1.0.0",
-    "description":  "Auto-update plugin for OpenCode - reads plugins.json and keeps plugin repos up to date",
-    "main":  "plugin-updater.js",
-    "type":  "module",
-    "license":  "MIT",
-    "author":  "intisy",
-    "repository":  {
-                       "type":  "git",
-                       "url":  "git+https://github.com/intisy/opencode-plugin-updater.git"
-                   },
-    "homepage":  "https://github.com/intisy/opencode-plugin-updater#readme",
-    "keywords":  [
-                     "opencode",
-                     "plugin",
-                     "updater",
-                     "auto-update"
-                 ],
-    "engines":  {
-                    "node":  "\u003e=20.0.0"
-                },
-    "files":  [
-                  "plugin-updater.js",
-                  "README.md"
-              ]
+    "name": "opencode-plugin-updater",
+    "version": "1.0.1",
+    "description": "Auto-update plugin for OpenCode - reads plugins.json and keeps plugin repos up to date",
+    "main": "plugin-updater.js",
+    "type": "module",
+    "license": "MIT",
+    "author": "intisy",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/intisy/opencode-plugin-updater.git"
+    },
+    "homepage": "https://github.com/intisy/opencode-plugin-updater#readme",
+    "keywords": [
+        "opencode",
+        "plugin",
+        "updater",
+        "auto-update"
+    ],
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "files": [
+        "plugin-updater.js",
+        "README.md"
+    ]
 }
