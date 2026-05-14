@@ -160,7 +160,7 @@ function ensureCloned(repo) {
   if (repo.bundle) run(repo.bundle, dir, "bundle");
   var outputPath = join(dir, repo.output);
   var destPath = join(PLUGINS_DIR, repo.pluginFile);
-  if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}\r
+  if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
   if (existsSync(outputPath)) {
     try { copyFileSync(outputPath, destPath); log("Copied " + repo.output + " -> " + repo.pluginFile); } catch(e){}
   }
@@ -212,7 +212,7 @@ function updateRepo(repo) {
   if (repo.build && !run(repo.build, dir, "build")) return { success: false, error: "Build failed" };
   if (repo.bundle && !run(repo.bundle, dir, "bundle")) return { success: false, error: "Bundle failed" };
 
-  if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}\r
+  if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
   if (existsSync(outputPath)) {
     try {
       copyFileSync(outputPath, destPath);
