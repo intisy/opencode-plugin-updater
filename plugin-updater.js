@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
+import { spawnSync } from "child_process";
 
 // ---------------------------------------------------------------------------
 // Config resolution
@@ -84,46 +85,43 @@ function log(msg) {
   } catch {}
 }
 
-async function run(cmd, cwd, label) {
+function run(cmd, cwd, label) {
   if (!cmd) { log(label + " skipped (null)"); return true; }
   try {
-    var proc = Bun.spawn(cmd, { cwd: cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-    var code = await proc.exited;
-    if (code !== 0) {
-      var errText = "";
-      try { errText = await new Response(proc.stderr).text(); } catch {}
-      log(label + " FAILED (exit " + code + "): " + errText.substring(0, 200));
+    var result = spawnSync(cmd[0], cmd.slice(1), { cwd: cwd, encoding: "utf-8", timeout: 120000 });
+    if (result.status !== 0) {
+      var errText = (result.stderr || "").substring(0, 200);
+      log(label + " FAILED (exit " + result.status + "): " + errText);
     } else {
       log(label + " OK");
     }
-    return code === 0;
+    return result.status === 0;
   } catch (e) {
     log(label + " ERROR: " + (e.message || e));
     return false;
   }
 }
 
-async function gitText(args, cwd) {
+function gitText(args, cwd) {
   try {
-    var proc = Bun.spawn(args, { cwd: cwd, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-    await proc.exited;
-    return (await new Response(proc.stdout).text()).trim();
+    var result = spawnSync(args[0], args.slice(1), { cwd: cwd, encoding: "utf-8", timeout: 10000 });
+    return (result.stdout || "").trim();
   } catch { return ""; }
 }
 
-async function getLocalHead(dir) {
+function getLocalHead(dir) {
   return gitText(["git", "rev-parse", "HEAD"], dir);
 }
 
-async function getRemoteHead(dir) {
+function getRemoteHead(dir) {
   for (var ref of ["origin/HEAD", "origin/main", "origin/master"]) {
-    var h = await gitText(["git", "rev-parse", ref], dir);
+    var h = gitText(["git", "rev-parse", ref], dir);
     if (h) return h;
   }
   return "";
 }
 
-async function getLastCommitSubject(dir) {
+function getLastCommitSubject(dir) {
   return gitText(["git", "log", "-1", "--format=%s"], dir);
 }
 
@@ -137,7 +135,7 @@ function getFolderName(repo) {
   return repo.name;
 }
 
-async function ensureCloned(repo) {
+function ensureCloned(repo) {
   var folderName = getFolderName(repo);
   var dir = join(REPOS_DIR, folderName);
 
@@ -151,14 +149,14 @@ async function ensureCloned(repo) {
   var cloneArgs = repo.branch
       ? ["git", "clone", "--branch", repo.branch, repo.url, folderName]
       : ["git", "clone", repo.url, folderName];
-    if (!await run(cloneArgs, REPOS_DIR, "git clone " + folderName)) {
+    if (!run(cloneArgs, REPOS_DIR, "git clone " + folderName)) {
       return null;
     }
 
-  if (repo.install) await run(repo.install, dir, "install");
-  if (repo.postInstall) await run(repo.postInstall, dir, "postInstall");
-  if (repo.build) await run(repo.build, dir, "build");
-  if (repo.bundle) await run(repo.bundle, dir, "bundle");
+  if (repo.install) run(repo.install, dir, "install");
+  if (repo.postInstall) run(repo.postInstall, dir, "postInstall");
+  if (repo.build) run(repo.build, dir, "build");
+  if (repo.bundle) run(repo.bundle, dir, "bundle");
   var outputPath = join(dir, repo.output);
   var destPath = join(PLUGINS_DIR, repo.pluginFile);
   if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}\r
@@ -169,33 +167,33 @@ async function ensureCloned(repo) {
   return dir;
 }
 
-async function updateRepo(repo) {
+function updateRepo(repo) {
   var folderName = getFolderName(repo);
   var dir = join(REPOS_DIR, folderName);
 
   log("--- " + folderName + " ---");
 
   if (!existsSync(dir)) {
-    var clonedDir = await ensureCloned(repo);
+    var clonedDir = ensureCloned(repo);
     if (!clonedDir) return { success: false, error: "Clone failed" };
-    var head = await getLocalHead(clonedDir);
+    var head = getLocalHead(clonedDir);
     return { success: true, changed: true, commit: head };
   }
 
-  var currentUrl = await gitText(["git", "remote", "get-url", "origin"], dir);
+  var currentUrl = gitText(["git", "remote", "get-url", "origin"], dir);
   if (currentUrl && currentUrl !== repo.url && currentUrl !== repo.url.replace(".git", "")) {
-    await run(["git", "remote", "set-url", "origin", repo.url], dir, "set-url");
+    run(["git", "remote", "set-url", "origin", repo.url], dir, "set-url");
   }
 
-  var headBefore = await getLocalHead(dir);
-  await run(["git", "fetch", "origin"], dir, "git fetch");
+  var headBefore = getLocalHead(dir);
+  run(["git", "fetch", "origin"], dir, "git fetch");
   if (repo.branch) {
-      await run(["git", "checkout", repo.branch], dir, "git checkout");
-      await run(["git", "pull", "--ff-only", "origin", repo.branch], dir, "git pull");
+      run(["git", "checkout", repo.branch], dir, "git checkout");
+      run(["git", "pull", "--ff-only", "origin", repo.branch], dir, "git pull");
     } else {
-      await run(["git", "pull", "--ff-only"], dir, "git pull");
+      run(["git", "pull", "--ff-only"], dir, "git pull");
     }
-  var headAfter = await getLocalHead(dir);
+  var headAfter = getLocalHead(dir);
   var changed = headBefore !== headAfter;
 
   var outputPath = join(dir, repo.output);
@@ -208,10 +206,10 @@ async function updateRepo(repo) {
   }
 
   log("Building (changed=" + changed + ")");
-  if (repo.install && !await run(repo.install, dir, "install")) return { success: false, error: "Install failed" };
-  if (repo.postInstall && !await run(repo.postInstall, dir, "postInstall")) return { success: false, error: "Post-install failed" };
-  if (repo.build && !await run(repo.build, dir, "build")) return { success: false, error: "Build failed" };
-  if (repo.bundle && !await run(repo.bundle, dir, "bundle")) return { success: false, error: "Bundle failed" };
+  if (repo.install && !run(repo.install, dir, "install")) return { success: false, error: "Install failed" };
+  if (repo.postInstall && !run(repo.postInstall, dir, "postInstall")) return { success: false, error: "Post-install failed" };
+  if (repo.build && !run(repo.build, dir, "build")) return { success: false, error: "Build failed" };
+  if (repo.bundle && !run(repo.bundle, dir, "bundle")) return { success: false, error: "Bundle failed" };
 
   if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}\r
   if (existsSync(outputPath)) {
@@ -227,7 +225,7 @@ async function updateRepo(repo) {
   return { success: true, changed: true, commit: headAfter };
 }
 
-async function updateAll(onlyAutoUpdate) {
+function updateAll(onlyAutoUpdate) {
   log("=== Plugin updater started (autoOnly=" + onlyAutoUpdate + ") ===");
   if (!existsSync(REPOS_DIR)) try { mkdirSync(REPOS_DIR, { recursive: true }); } catch {}
   if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
@@ -246,7 +244,7 @@ async function updateAll(onlyAutoUpdate) {
           var manualDir = join(REPOS_DIR, manualFolder);
           if (!existsSync(manualDir)) {
             log("Initial clone for manual plugin: " + manualFolder);
-            await ensureCloned(repo);
+            ensureCloned(repo);
           } else {
             // Repo exists but plugin file may be missing (e.g. plugin/ dir was deleted)
             if (!existsSync(PLUGINS_DIR)) try { mkdirSync(PLUGINS_DIR, { recursive: true }); } catch {}
@@ -257,9 +255,9 @@ async function updateAll(onlyAutoUpdate) {
                 try { copyFileSync(manualOutput, manualDest); log("Restored " + repo.pluginFile); } catch(e) {}
               } else {
                 // Output missing too — need to rebuild
-                if (repo.install) await run(repo.install, manualDir, "install");
-                if (repo.build) await run(repo.build, manualDir, "build");
-                if (repo.bundle) await run(repo.bundle, manualDir, "bundle");
+                if (repo.install) run(repo.install, manualDir, "install");
+                if (repo.build) run(repo.build, manualDir, "build");
+                if (repo.bundle) run(repo.bundle, manualDir, "bundle");
                 if (existsSync(manualOutput)) {
                   try { copyFileSync(manualOutput, manualDest); log("Rebuilt and restored " + repo.pluginFile); } catch(e) {}
                 }
@@ -270,7 +268,7 @@ async function updateAll(onlyAutoUpdate) {
           continue;
         }
     try {
-      var r = await updateRepo(repo);
+      var r = updateRepo(repo);
       results.push({ name: repo.name, ...r });
     } catch (e) {
       log(repo.name + " unexpected error: " + (e.message || e));
@@ -289,7 +287,7 @@ async function updateAll(onlyAutoUpdate) {
 setTimeout(function () {
   if (globalThis.__pluginUpdaterAutoRan) return;
   globalThis.__pluginUpdaterAutoRan = true;
-  updateAll(true).catch(function () {});
+  try { updateAll(true); } catch {};
 }, 0);
 
 // ---------------------------------------------------------------------------
@@ -322,10 +320,10 @@ export default async function PluginUpdater(ctx) {
             var updateAvailable = false;
 
             if (installed) {
-              await run(["git", "fetch", "origin"], dir, "fetch " + repo.name);
-              localHead = await getLocalHead(dir);
-              remoteHead = await getRemoteHead(dir);
-              subject = await getLastCommitSubject(dir);
+              run(["git", "fetch", "origin"], dir, "fetch " + repo.name);
+              localHead = getLocalHead(dir);
+              remoteHead = getRemoteHead(dir);
+              subject = getLastCommitSubject(dir);
               updateAvailable = !!(localHead && remoteHead && localHead !== remoteHead);
             }
 
@@ -360,13 +358,13 @@ export default async function PluginUpdater(ctx) {
             if (!repo)
               return "Plugin not found: " + args.name + "\nAvailable: " + plugins.map(function (p) { return p.name; }).join(", ");
 
-            var r = await updateRepo(repo);
+            var r = updateRepo(repo);
             if (!r.success) return "FAILED to update " + args.name + ": " + r.error;
             if (!r.changed) return args.name + " is already up to date (commit " + (r.commit || "").substring(0, 8) + ").";
             return "Updated " + args.name + " to " + (r.commit || "").substring(0, 8) + ". Restart OpenCode to apply.";
           }
 
-          var results = await updateAll(false);
+          var results = updateAll(false);
           var out = results.map(function (r) {
             if (r.skipped) return r.name + ": skipped (" + r.reason + ")";
             if (!r.success) return r.name + ": FAILED (" + r.error + ")";
