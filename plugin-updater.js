@@ -321,18 +321,18 @@ function selfUpdate() {
   }
 }
 
-setTimeout(function () {
-  if (globalThis.__pluginUpdaterAutoRan) return;
-  globalThis.__pluginUpdaterAutoRan = true;
-  try { selfUpdate(); } catch {}
-  try { updateAll(true); } catch {};
-}, 0);
+
 
 // ---------------------------------------------------------------------------
 // OpenCode plugin export
 // ---------------------------------------------------------------------------
 
 export default async function PluginUpdater(ctx) {
+  if (!globalThis.__pluginUpdaterAutoRan) {
+    globalThis.__pluginUpdaterAutoRan = true;
+    try { selfUpdate(); } catch {}
+    try { updateAll(true); } catch {}
+  }
   return {
     tool: {
 
