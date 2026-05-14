@@ -1,8 +1,13 @@
 {
   "name": "opencode-plugin-updater",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Auto-update plugin for OpenCode - reads plugins.json and keeps plugin repos up to date",
   "main": "plugin-updater.js",
+  "exports": {
+    ".": {
+      "import": "./plugin-updater.js"
+    }
+  },
   "type": "module",
   "license": "MIT",
   "author": "intisy",
